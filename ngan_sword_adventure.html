@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8' />
+  <title>Ngan Sword Adventure</title>
+  <style>
+    body { margin: 0; background: #222; color:#fff; font-family:sans-serif; text-align:center; }
+    #game-container { width: 100%; height: 100vh; }
+  </style>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/phaser/3.70.0/phaser.min.js'></script>
+</head>
+<body>
+  <h1>Ngan Sword Adventure</h1>
+  <div id='game-container'></div>
+  <script>
+    //--------------------------------------------------
+    //  Preload scene – nạp asset
+    //--------------------------------------------------
+    class PreloadScene extends Phaser.Scene {
+      constructor(){ super('PreloadScene'); }
+      preload(){
+        // \  Đảm bảo bạn đặt bb.png (ảnh Ngân) vào thư mục assets cùng cấp file HTML  /
+        this.load.image('bg', 'assets/bg.png');
+        this.load.image('ground', 'assets/ground.png');
+
+        // Cùng một ảnh dùng cho cả nhân vật & quái
+        this.load.image('ngan', 'assets/bb.png');
+        this.load.image('monster', 'assets/bb.png');
+      }
+      create(){
+        this.scene.start('GameScene', { level: 1 });
+      }
+    }
+
+    //--------------------------------------------------
+    //  Game scene – gameplay chính
+    //--------------------------------------------------
+    class GameScene extends Phaser.Scene {
+      constructor(){ super('GameScene'); }
+      init(data){ this.level = data.level || 1; }
+
+      create(){
+        // Background & nền đất
+        this.add.image(400, 300, 'bg').setScale(2);
+        const platforms = this.physics.add.staticGroup();
+        platforms.create(400, 568, 'ground').setScale(2).refreshBody();
+
+        // Nhân vật Ngân – thu nhỏ ảnh gốc để vừa màn
+        this.player = this.physics.add.sprite(100, 450, 'ngan').setScale(0.35);
+        this.player.setCollideWorldBounds(true);
+        this.physics.add.collider(this.player, platforms);
+
+        // Điều khiển
+        this.cursors = this.input.keyboard.createCursorKeys();
+
+        // Quái vật
+        this.monsters = this.physics.add.group();
+        this.spawnMonsters(this.level);
+        this.physics.add.collider(this.monsters, platforms);
+        this.physics.add.overlap(this.player, this.monsters, this.hitPlayer, null, this);
+
+        // UI: hiển thị level
+        this.levelText = this.add.text(16, 16, `Level ${this.level}`, { fontSize: '18px', fill: '#fff' });
+      }
+
+      //--------------------------------------------------
+      //  Spawn quái – scale nhỏ hơn
+      //--------------------------------------------------
+      spawnMonsters(level){
+        for(let i = 0; i < level; i++){
+          const x = Phaser.Math.Between(400, 780);
+          const m = this.monsters.create(x, 0, 'monster').setScale(0.2);
+          m.setBounce(1);
+          m.setCollideWorldBounds(true);
+          m.setVelocity(Phaser.Math.Between(-200, 200), 20);
+        }
+      }
+
+      //--------------------------------------------------
+      //  Khi Ngân chạm quái
+      //--------------------------------------------------
+      hitPlayer(player, monster){
+        monster.disableBody(true, true);
+        if(this.monsters.countActive(true) === 0){
+          // Qua màn sau khi diệt hết quái
+          this.time.delayedCall(1000, () => this.scene.restart({ level: this.level + 1 }));
+        }
+      }
+
+      //--------------------------------------------------
+      //  Update mỗi frame
+      //--------------------------------------------------
+      update(){
+        // Di chuyển ngang + lật ảnh khi đi sang trái
+        if(this.cursors.left.isDown){
+          this.player.setVelocityX(-160);
+          this.player.flipX = true;
+        } else if(this.cursors.right.isDown){
+          this.player.setVelocityX(160);
+          this.player.flipX = false;
+        } else {
+          this.player.setVelocityX(0);
+        }
+
+        // Nhảy
+        if(this.cursors.up.isDown && this.player.body.blocked.down){
+          this.player.setVelocityY(-330);
+        }
+      }
+    }
+
+    //--------------------------------------------------
+    //  Khởi tạo game
+    //--------------------------------------------------
+    new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'game-container',
+      width: 800,
+      height: 600,
+      physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 500 }, debug: false }
+      },
+      scene: [PreloadScene, GameScene]
+    });
+  </script>
+</body>
+</html>
