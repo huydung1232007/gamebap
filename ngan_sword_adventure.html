@@ -2,174 +2,306 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <title>Chiến Binh Xuyên 1 Màn</title>
+  <title>Chiến Binh Xuyên 5 Màn</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{background:#111;height:100vh;display:flex;justify-content:center;align-items:center;font-family:sans-serif;color:#fff;-webkit-user-select:none;user-select:none;touch-action:none}
-    #ui{position:absolute;top:8px;left:50%;transform:translateX(-50%);text-align:center;font-size:22px}
-    /* mobile pad */
-    #pad{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);display:flex;gap:20px}
-    .btn{width:100px;height:100px;background:#333;border-radius:12px;display:flex;justify-content:center;align-items:center;font-size:40px;color:#fff}
-    @media(min-width:900px){#pad{display:none}}
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: sans-serif;
+      color: #fff;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+
+    #ui {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      font-size: 18px;
+      z-index: 5;
+      white-space: nowrap;
+    }
+
+    #touchControls {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 16px;
+      z-index: 10;
+    }
+
+    #touchControls button {
+      width: 72px;
+      height: 72px;
+      border: none;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 32px;
+      font-weight: bold;
+      backdrop-filter: blur(4px);
+    }
+
+    /* Ẩn các nút điều khiển cảm ứng trên thiết bị có hover (desktop) */
+    @media (hover: hover) and (pointer: fine) {
+      #touchControls { display: none; }
+    }
   </style>
 </head>
 <body>
-  <canvas id="c"></canvas>
-  <div id="ui"></div>
-  <div id="pad">
-    <div id="left"  class="btn">←</div>
-    <div id="fire"  class="btn">⚔</div>
-    <div id="right" class="btn">→</div>
+  <canvas id="game"></canvas>
+  <div id="ui"><span id="levelLabel">Màn 1 / 5</span> | HP: <span id="hpLabel">3</span></div>
+
+  <!-- Touch controls for mobile -->
+  <div id="touchControls">
+    <button id="btnLeft">←</button>
+    <button id="btnAttack">⚔</button>
+    <button id="btnRight">→</button>
   </div>
 
   <script>
-    // ---------- Canvas ----------
-    const canvas=document.getElementById('c');
-    const ctx=canvas.getContext('2d');
-    function resize(){
-      canvas.width = innerWidth;
-      canvas.height= innerHeight;
+    /************** CANVAS SETUP **************/
+    const canvas = document.getElementById('game');
+    const ctx    = canvas.getContext('2d');
+
+    // Hỗ trợ hiển thị nét căng trên màn hình Retina
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width  = window.innerWidth  * dpr;
+      canvas.height = window.innerHeight * dpr;
+      ctx.scale(dpr, dpr);
     }
-    window.addEventListener('resize',()=>{
-      resize();
-      // giữ nhân vật trong khung khi đổi hướng
-      if(hero){
-        hero.x=Math.max(hero.w/2,Math.min(canvas.width-hero.w/2,hero.x));
-        hero.y=canvas.height-150;
+    window.addEventListener('resize', resize);
+    resize();
+
+    /************** INPUT **************/
+    const input = { left: false, right: false, attackOnce: false };
+
+    // Keyboard controls
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft')  input.left  = true;
+      if (e.key === 'ArrowRight') input.right = true;
+      if (e.key === ' ' || e.key === 'Spacebar') input.attackOnce = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft')  input.left  = false;
+      if (e.key === 'ArrowRight') input.right = false;
+    });
+
+    // Touch controls
+    const btnLeft   = document.getElementById('btnLeft');
+    const btnRight  = document.getElementById('btnRight');
+    const btnAttack = document.getElementById('btnAttack');
+
+    function addTouch(btn, key) {
+      btn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (key === 'attack') input.attackOnce = true;
+        else input[key] = true;
+      }, { passive: false });
+      btn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (key !== 'attack') input[key] = false;
+      }, { passive: false });
+    }
+    addTouch(btnLeft,   'left');
+    addTouch(btnRight,  'right');
+    addTouch(btnAttack, 'attack');
+
+    /************** ASSETS **************/
+    const warriorImg = new Image();
+    warriorImg.src = 'https://archive.org/download/bb_20250607_202506/bb.png'; // Đặt file ảnh nhân vật chung thư mục & đúng tên
+    let warriorReady = false;
+    warriorImg.onload = () => warriorReady = true;
+
+    /************** GAME OBJECTS **************/
+    class Warrior {
+      constructor() {
+        this.w = 80;
+        this.h = 120;
+        this.x = (canvas.width / window.devicePixelRatio - this.w) / 2;
+        this.y = window.innerHeight - this.h - 30;
+        this.speed = 6;
+        this.hpMax = 3;
+        this.hp = this.hpMax;
+        this.fireCooldown = 0;
+        this.name = 'Ngô Thùy Ngân';
       }
-    });
-
-    // ---------- Assets ----------
-    const heroImg=new Image(); heroImg.src='https://archive.org/download/bb_20250607_202506/bb.png'; // đặt chung thư mục hoặc đổi đường dẫn
-    const monsterImg=new Image(); monsterImg.src='https://archive.org/download/hh_20250607/hh.png';
-    let heroReady=false,monsterReady=false;
-    heroImg.onload=()=>heroReady=true;
-    monsterImg.onload=()=>monsterReady=true;
-
-    // ---------- Input ----------
-    const keys={left:false,right:false,fire:false};
-    document.addEventListener('keydown',e=>{
-      if(e.code==='ArrowLeft')  keys.left=true;
-      if(e.code==='ArrowRight') keys.right=true;
-      if(e.code==='Space')      keys.fire=true;
-    });
-    document.addEventListener('keyup',e=>{
-      if(e.code==='ArrowLeft')  keys.left=false;
-      if(e.code==='ArrowRight') keys.right=false;
-      if(e.code==='Space')      keys.fire=false;
-    });
-    // touch buttons
-    const leftBtn=document.getElementById('left');
-    const rightBtn=document.getElementById('right');
-    const fireBtn=document.getElementById('fire');
-    ['touchstart','mousedown'].forEach(ev=>{
-      leftBtn.addEventListener(ev,e=>{e.preventDefault();keys.left=true;});
-      rightBtn.addEventListener(ev,e=>{e.preventDefault();keys.right=true;});
-      fireBtn.addEventListener(ev,e=>{e.preventDefault();keys.fire=true;});
-    });
-    ['touchend','touchcancel','mouseup','mouseleave'].forEach(ev=>{
-      leftBtn.addEventListener(ev,()=>keys.left=false);
-      rightBtn.addEventListener(ev,()=>keys.right=false);
-      fireBtn.addEventListener(ev,()=>keys.fire=false);
-    });
-
-    // ---------- Classes ----------
-    class Hero{
-      constructor(){
-        this.w=60;this.h=90;this.x=canvas.width/2;this.y=canvas.height-150;
-        this.speed=360; // px per second
-        this.hpMax=3;this.hp=this.hpMax;
-        this.lastShot=0;this.shotDelay=0.333; // s
-        this.name='Ngô Thùy Ngân';
+      update() {
+        if (input.left)  this.x -= this.speed;
+        if (input.right) this.x += this.speed;
+        // Giới hạn trong màn hình
+        this.x = Math.max(0, Math.min(window.innerWidth - this.w, this.x));
+        if (this.fireCooldown > 0) this.fireCooldown--;
       }
-      update(dt){
-        if(keys.left)  this.x-=this.speed*dt;
-        if(keys.right) this.x+=this.speed*dt;
-        this.x=Math.max(this.w/2,Math.min(canvas.width-this.w/2,this.x));
-        // shoot
-        if(keys.fire && (performance.now()-this.lastShot*1000)>this.shotDelay*1000){
-          bullets.push(new Bullet(this.x,this.y-40));
-          this.lastShot=performance.now()/1000;
+      canShoot() { return this.fireCooldown === 0; }
+      shoot() {
+        this.fireCooldown = 15; // ~4 phát/giây ở 60fps
+        lasers.push(new Laser(this.x + this.w / 2 - 3, this.y - 10));
+      }
+      draw() {
+        // Sprite
+        if (warriorReady) ctx.drawImage(warriorImg, this.x, this.y, this.w, this.h);
+        else {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(this.x, this.y, this.w, this.h);
+        }
+        // Name
+        ctx.font = '18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(this.name, this.x + this.w / 2, this.y - 24);
+        // Health bar
+        const barW = this.w;
+        const barH = 6;
+        const barX = this.x;
+        const barY = this.y - 14;
+        ctx.fillStyle = '#555';
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(barX, barY, barW * (this.hp / this.hpMax), barH);
+      }
+      get rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
+    }
+
+    class Laser {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 6;
+        this.h = 20;
+        this.speed = 12;
+      }
+      update() { this.y -= this.speed; }
+      offScreen() { return this.y + this.h < 0; }
+      draw() {
+        ctx.fillStyle = '#0ff';
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+      }
+      get rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
+    }
+
+    class Monster {
+      constructor(level) {
+        this.w = 80;
+        this.h = 80;
+        this.x = Math.random() * (window.innerWidth - this.w);
+        this.y = 100 + Math.random() * 150;
+        this.baseSpeed = 2 + level * 0.4;
+        this.dx = this.baseSpeed;
+        this.hp = 1 + level;
+      }
+      update() {
+        this.x += this.dx;
+        // Đổi hướng khi chạm mép
+        if (this.x <= 0 || this.x + this.w >= window.innerWidth) {
+          this.dx *= -1;
+          this.y += 10; // Tiến xuống gần người chơi hơn
         }
       }
-      draw(){
-        if(heroReady) ctx.drawImage(heroImg,this.x-this.w/2,this.y-this.h/2,this.w,this.h);
-        else {ctx.fillStyle='#f7c';ctx.fillRect(this.x-this.w/2,this.y-this.h/2,this.w,this.h);} 
-        // name & hp bar
-        ctx.fillStyle='#fff';ctx.font='16px sans-serif';ctx.textAlign='center';
-        ctx.fillText(this.name,this.x,this.y-this.h/2-22);
-        const barW=this.w,pct=this.hp/this.hpMax;
-        ctx.fillStyle='#444';ctx.fillRect(this.x-barW/2,this.y-this.h/2-12,barW,6);
-        ctx.fillStyle='#0f0';ctx.fillRect(this.x-barW/2,this.y-this.h/2-12,barW*pct,6);
+      draw() {
+        ctx.fillStyle = '#c33';
+        ctx.fillRect(this.x, this.y, this.w, this.h);
       }
+      get rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
     }
 
-    class Monster{
-      constructor(){
-        this.size=80;this.x=canvas.width/2;this.y=120;
-        this.dir=1;this.speed=120; // px per second
-        const base=5;this.hpMax=base*10;this.hp=this.hpMax; // máu gấp 10
-      }
-      update(dt){
-        this.x+=this.dir*this.speed*dt;
-        if(this.x<this.size/2 || this.x>canvas.width-this.size/2){
-          this.dir*=-1;this.y+=40;
-        }
-        if(this.y>canvas.height) this.y=120;
-      }
-      draw(){
-        if(monsterReady) ctx.drawImage(monsterImg,this.x-this.size/2,this.y-this.size/2,this.size,this.size);
-        else {ctx.fillStyle='#f00';ctx.fillRect(this.x-this.size/2,this.y-this.size/2,this.size,this.size);} 
-        const pct=this.hp/this.hpMax;
-        ctx.fillStyle='#555';ctx.fillRect(this.x-this.size/2,this.y-this.size/2-12,this.size,6);
-        ctx.fillStyle='#f00';ctx.fillRect(this.x-this.size/2,this.y-this.size/2-12,this.size*pct,6);
-      }
+    /************** COLLISION **************/
+    function rectsIntersect(a, b) {
+      return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
     }
 
-    class Bullet{
-      constructor(x,y){this.x=x;this.y=y;this.speed=600;this.r=4;}
-      update(dt){this.y-=this.speed*dt;}
-      draw(){ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();}
+    /************** GAME STATE **************/
+    let warrior = new Warrior();
+    let level    = 1;
+    let monsters = [new Monster(level)];
+    const lasers = [];
+    const maxLevel = 5;
+
+    function nextLevel() {
+      level++;
+      if (level > maxLevel) {
+        alert('Bạn đã chiến thắng tất cả quái vật!');
+        window.location.reload();
+        return;
+      }
+      document.getElementById('levelLabel').textContent = `Màn ${level} / ${maxLevel}`;
+      monsters = [new Monster(level)];
     }
 
-    // ---------- Game State ----------
-    let hero,monster,bullets=[],level=1,levelMax=1;
-    function spawnMonster(){monster=new Monster();}
+    /************** MAIN LOOP **************/
+    function loop() {
+      requestAnimationFrame(loop);
 
-    // ---------- Main Loop ----------
-    let lastTime=0;
-    function loop(now){
-      const dt=(now-lastTime)/1000;lastTime=now;
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      // update
-      hero.update(dt);
-      monster.update(dt);
-      bullets.forEach(b=>b.update(dt));
-      // collisions
-      bullets=bullets.filter(b=>{
-        if(Math.abs(b.x-monster.x)<monster.size/2 && Math.abs(b.y-monster.y)<monster.size/2){
-          monster.hp--;return false;
-        }
-        return b.y>0;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      // Update
+      warrior.update();
+      if (input.attackOnce && warrior.canShoot()) warrior.shoot();
+      input.attackOnce = false; // Reset single-fire flag
+
+      lasers.forEach((l, i) => {
+        l.update();
+        if (l.offScreen()) lasers.splice(i, 1);
       });
-      if(monster.hp<=0){level++;if(level>levelMax){alert('Chiến thắng!');return;}spawnMonster();bullets=[];}
-      // draw
-      hero.draw();monster.draw();bullets.forEach(b=>b.draw());
-      document.getElementById('ui').innerText=`Màn ${level} / ${levelMax} | HP: ${hero.hp}`;
-      requestAnimationFrame(loop);
+
+      monsters.forEach(m => m.update());
+
+      // Collisions: Laser ↔ Monster
+      for (let li = lasers.length - 1; li >= 0; li--) {
+        for (let mi = monsters.length - 1; mi >= 0; mi--) {
+          if (rectsIntersect(lasers[li].rect, monsters[mi].rect)) {
+            monsters[mi].hp--;
+            lasers.splice(li, 1);
+            if (monsters[mi].hp <= 0) monsters.splice(mi, 1);
+            break;
+          }
+        }
+      }
+
+      // Collisions: Monster ↔ Warrior
+      monsters.forEach(m => {
+        if (rectsIntersect(m.rect, warrior.rect)) {
+          if (warrior.hp > 0) {
+            warrior.hp--;
+            document.getElementById('hpLabel').textContent = warrior.hp;
+          }
+          m.x += m.dx * 10; // Đẩy quái ra nhẹ
+          if (warrior.hp <= 0) {
+            alert('Bạn đã bị đánh bại!');
+            window.location.reload();
+          }
+        }
+      });
+
+      // Level cleared?
+      if (monsters.length === 0) nextLevel();
+
+      // Draw
+      warrior.draw();
+      lasers.forEach(l => l.draw());
+      monsters.forEach(m => m.draw());
     }
 
-    // ---------- Start Game ----------
-    function startGame(){
-      resize();
-      hero=new Hero();
-      spawnMonster();
-      bullets=[];
-      lastTime=performance.now();
-      requestAnimationFrame(loop);
-    }
-    window.addEventListener('load',startGame);
+    // 🔥 Bắt đầu game!
+    loop();
   </script>
 </body>
 </html>
